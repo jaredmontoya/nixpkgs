@@ -103,7 +103,7 @@ in
 
               useCUDA = mkOption {
                 type = bool;
-                default = config.cudaSupport;
+                default = pkgs.config.cudaSupport;
                 defaultText = literalExpression "config.cudaSupport";
                 description = ''
                   Whether to accelerate the underlying onnxruntime library with CUDA.

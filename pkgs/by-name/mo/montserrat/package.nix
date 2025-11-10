@@ -24,6 +24,7 @@ stdenvNoCC.mkDerivation (finalAttrs: {
 
     mv fonts/otf $out/share/fonts/otf
     mv fonts/ttf $out/share/fonts/ttf
+    mv fonts/variable $out/share/fonts/variable
     mv fonts/webfonts $out/share/fonts/woff2
 
     runHook postInstall

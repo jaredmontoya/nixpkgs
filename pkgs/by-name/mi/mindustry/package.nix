@@ -93,9 +93,7 @@ stdenv.mkDerivation {
   '';
 
   patches = [
-    # Fixes a build system issue where the classes UnsafeBuffers and Java16Buffers get built
-    # and copied multiple times, which causes conflicts when zipping up the final arc-core jar.
-    ./0001-fix-duplicate-classes.patch
+    ./0001-fix-duplicate-handling-in-arc-core-jar.patch
   ];
 
   postPatch = ''

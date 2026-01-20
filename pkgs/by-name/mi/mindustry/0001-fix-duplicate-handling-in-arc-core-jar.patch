@@ -1,0 +1,27 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: nixpkgs <nixpkgs@nixos.org>
+Date: Thu, 6 Feb 2025 13:20:00 +0000
+Subject: [PATCH] Fix duplicate handling in arc-core jar task
+
+Add duplicate handling strategy to prevent build failure when
+Java16Buffers.class appears in both compiled sources and unsafe.jar.
+
+This issue appeared in Arc 154.3 due to changes in the build process.
+---
+ Arc/arc-core/build.gradle | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/Arc/arc-core/build.gradle b/Arc/arc-core/build.gradle
+index 1234567..abcdefg 100644
+--- a/Arc/arc-core/build.gradle
++++ b/Arc/arc-core/build.gradle
+@@ -17,6 +17,7 @@ dependencies{
+ }
+ 
+ jar{
++    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+     from{
+         configurations.extraLibs.collect{ it.isDirectory() ? it : zipTree(it) }
+     }
+-- 
+2.45.2

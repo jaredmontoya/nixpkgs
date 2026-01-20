@@ -38,7 +38,7 @@
 
 let
   pname = "mindustry";
-  version = "153";
+  version = "154.3";
   buildVersion = makeBuildVersion version;
 
   jdk = jdk17;
@@ -48,21 +48,21 @@ let
     owner = "Anuken";
     repo = "Mindustry";
     tag = "v${version}";
-    hash = "sha256-yVrOHZOCZrI5SsmMdo7Eh+zS0PXv2X67zLCdLOWcPVc=";
+    hash = "sha256-PguKdpZ3yaV7eW1NKZpbsOEUiMxX6gdYZxJ4p7wkvi8=";
   };
   Arc = fetchFromGitHub {
     name = "Arc-source";
     owner = "Anuken";
     repo = "Arc";
     tag = "v${version}";
-    hash = "sha256-JyiFxzdZtU0ILytTCfZrhBU2oZ3gF1kzMbSdjxqvTYs=";
+    hash = "sha256-RMoXtyDh9DbEYxYLAopItp6Bf8kg92Av+g5lSqKFhdU=";
   };
   soloud = fetchFromGitHub {
     owner = "Anuken";
     repo = "soloud";
     # This is pinned in Arc's arc-core/build.gradle
-    tag = "v0.11";
-    hash = "sha256-jybIILdK3cqyZ2LIuoWDfZWocVTbKszekKCLil0WXRY=";
+    tag = "2025.12.01";
+    hash = "sha256-I+VZW34eRGn1RJmK8e9nVSXIFSOK/pER+xEhmXeUB4Y=";
   };
 
   desktopItem = makeDesktopItem {
@@ -93,7 +93,7 @@ stdenv.mkDerivation {
   '';
 
   patches = [
-    ./0001-fix-include-path-for-SDL2-on-linux.patch
+    ./0001-fix-duplicate-handling-in-arc-core-jar.patch
   ];
 
   postPatch = ''
@@ -164,7 +164,7 @@ stdenv.mkDerivation {
       --add-needed "$glewlib" \
       --add-needed "$sdllib"
     # Put the freshly-built libraries where the pre-built libraries used to be:
-    cp arc-core/build/Arc/arc-core/libs/*/* natives/natives-desktop/libs/
+    cp arc-core/libs/*/* natives/natives-desktop/libs/
     cp backends/backend-sdl/build/Arc/backends/backend-sdl/libs/*/* natives/natives-desktop/libs/
     # below target dirs are based on Arc upstream: Arc/extensions/../build.gradle
     cp extensions/freetype/build/Arc/extensions/freetype/libs/*/* natives/natives-freetype-desktop/libs/

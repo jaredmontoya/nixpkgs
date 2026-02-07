@@ -93,11 +93,16 @@ stdenv.mkDerivation {
   '';
 
   postPatch = ''
-    # Java16Buffers.class appears in both the compiled output (via copyUnsafeStuff)
-    # and in extraLibs (via unsafe.jar), causing duplicate entry errors in the
-    # arc-core jar task. Remove the duplicate by excluding it in the jar task.
-    substituteInPlace Arc/arc-core/build.gradle \
-      --replace-fail "jar{" "jar{ duplicatesStrategy = DuplicatesStrategy.EXCLUDE"
+    # When building natives from source (jnigenBuild), the copyUnsafeStuff task
+    # copies classes from unsafe.jar into build/classes/java/main/. The jar task
+    # also includes unsafe.jar classes via extraLibs, causing duplicate class
+    # errors (e.g. Java16Buffers.class). Fix by replacing the extraLibs from-block
+    # with a doFirst that copies unsafe.jar classes into build/classes/java/main,
+    # so they only enter the jar once via the compiled output directory.
+    sed -i '/^jar{/,/^}/{
+      /from{/,/^    }/d
+      /^jar{/a\    doFirst { copy { from zipTree("unsafe/unsafe.jar"); into "build/classes/java/main"; include "**/*.class" } }
+    }' Arc/arc-core/build.gradle
 
     # Ensure the prebuilt shared objects don't accidentally get shipped
     rm -r Arc/natives/natives-*/libs/*

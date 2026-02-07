@@ -92,11 +92,13 @@ stdenv.mkDerivation {
     runHook postUnpack
   '';
 
-  patches = [
-    ./0001-fix-duplicate-handling-in-arc-core-jar.patch
-  ];
-
   postPatch = ''
+    # Java16Buffers.class appears in both the compiled output (via copyUnsafeStuff)
+    # and in extraLibs (via unsafe.jar), causing duplicate entry errors in the
+    # arc-core jar task. Remove the duplicate by excluding it in the jar task.
+    substituteInPlace Arc/arc-core/build.gradle \
+      --replace-fail "jar{" "jar{ duplicatesStrategy = DuplicatesStrategy.EXCLUDE"
+
     # Ensure the prebuilt shared objects don't accidentally get shipped
     rm -r Arc/natives/natives-*/libs/*
     rm -r Arc/backends/backend-*/libs/*

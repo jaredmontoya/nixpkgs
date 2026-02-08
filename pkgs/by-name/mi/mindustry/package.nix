@@ -97,6 +97,11 @@ stdenv.mkDerivation {
     rm -r Arc/natives/natives-*/libs/*
     rm -r Arc/backends/backend-*/libs/*
 
+    # Fix duplicate class entries in arc-core jar caused by copyUnsafeStuff
+    # putting classes in the compile output dir while extraLibs also includes them
+    substituteInPlace Arc/arc-core/build.gradle \
+      --replace-fail 'jar{' 'jar{ duplicatesStrategy = DuplicatesStrategy.EXCLUDE'
+
     cd Mindustry
 
     # Remove unbuildable iOS stuff
@@ -160,7 +165,7 @@ stdenv.mkDerivation {
       --add-needed "$glewlib" \
       --add-needed "$sdllib"
     # Put the freshly-built libraries where the pre-built libraries used to be:
-    cp arc-core/build/Arc/arc-core/libs/*/* natives/natives-desktop/libs/
+    cp arc-core/libs/*/* natives/natives-desktop/libs/
     cp backends/backend-sdl/build/Arc/backends/backend-sdl/libs/*/* natives/natives-desktop/libs/
     # below target dirs are based on Arc upstream: Arc/extensions/../build.gradle
     cp extensions/freetype/build/Arc/extensions/freetype/libs/*/* natives/natives-freetype-desktop/libs/

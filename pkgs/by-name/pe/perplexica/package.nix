@@ -1,122 +1,123 @@
 {
   lib,
-  mkYarnPackage,
-  fetchYarnDeps,
-  fetchFromGitHub,
-  makeWrapper,
-  nodejs_22,
-  patchelf,
-  srcOnly,
-  python3,
-  removeReferencesTo,
   stdenv,
-  cctools,
+  fetchFromGitHub,
+  fetchYarnDeps,
+  yarnConfigHook,
+  yarnBuildHook,
+  makeWrapper,
+  nodejs,
+  node-gyp,
+  python3,
+  srcOnly,
+  removeReferencesTo,
   montserrat,
 }:
 
 let
   pin = lib.importJSON ./pin.json;
-  inherit (pin) version;
-  pname = "perplexica-backend";
-  nodeSources = srcOnly nodejs_22;
+  nodeSources = srcOnly nodejs;
+in
+stdenv.mkDerivation (finalAttrs: {
+  pname = "perplexica";
+  version = pin.version;
 
   src = fetchFromGitHub {
     owner = "ItzCrazyKns";
     repo = "Perplexica";
-    rev = "v${version}";
+    tag = "v${finalAttrs.version}";
     hash = pin.srcHash;
   };
 
-  passthru = {
-    nodeAppDir = "libexec/${pname}/deps/${pname}";
-    updateScript = ./update.sh;
+  yarnOfflineCache = fetchYarnDeps {
+    yarnLock = "${finalAttrs.src}/yarn.lock";
+    hash = pin.yarnHash;
   };
-in
-mkYarnPackage {
-  inherit
-    version
-    pname
-    src
-    passthru
-    ;
-
-  packageJSON = ./package.json;
-  offlineCache = fetchYarnDeps {
-    yarnLock = "${src}/yarn.lock";
-    sha256 = pin.yarnSha256;
-  };
-
-  nodejs = nodejs_22;
 
   nativeBuildInputs = [
+    yarnConfigHook
+    yarnBuildHook
     makeWrapper
+    nodejs
+    node-gyp
+    python3
   ];
 
-  buildPhase = ''
-    runHook preBuild
-
-    yarn --offline build
-
-    runHook postBuild
-  '';
-
-  pkgConfig = {
-    better-sqlite3 = {
-      nativeBuildInputs = [
-        python3
-        patchelf
-        nodejs_22
-      ]
-      ++ lib.optionals stdenv.isDarwin [ cctools ];
-      postInstall = ''
-        # build native sqlite bindings
-        npm run build-release --offline --nodedir="${nodeSources}"
-        find build -type f -exec \
-          ${removeReferencesTo}/bin/remove-references-to \
-          -t "${nodeSources}" {} \;
-      '';
-    };
-  };
-
-  doCheck = false;
-
-  postInstall = ''
-    OUT_JS_DIR="$out/${passthru.nodeAppDir}/dist"
-
-    # server wrapper
-    makeWrapper '${nodejs_22}/bin/node' "$out/bin/${pname}" \
-      --add-flags "$OUT_JS_DIR/app.js"
-  '';
-
+  # Patch Google Font to use a local copy (sandbox blocks network access)
   postPatch = ''
-    substituteInPlace src/app/layout.tsx --replace-fail \
-      "{ Montserrat } from 'next/font/google'" \
-      "localFont from 'next/font/local'"
+        substituteInPlace src/app/layout.tsx \
+          --replace-fail "import { Montserrat } from 'next/font/google';" \
+                         "import localFont from 'next/font/local';" \
+          --replace-fail "const montserrat = Montserrat({
+      weight: ['300', '400', '500', '700'],
+      subsets: ['latin'],
+      display: 'swap',
+      fallback: ['Arial', 'sans-serif'],
+    });" \
+                         "const montserrat = localFont({
+      src: './Montserrat.ttf',
+      weight: '100 900',
+      display: 'swap',
+      fallback: ['Arial', 'sans-serif'],
+    });"
 
-    substituteInPlace src/app/layout.tsx --replace-fail \
-      "Montserrat({" \
-      "localFont({"
+        cp "${montserrat}/share/fonts/variable/Montserrat[wght].ttf" src/app/Montserrat.ttf
 
-    substituteInPlace src/app/layout.tsx --replace-fail \
-      "subsets: ['latin']" \
-      "src: './Montserrat.woff2'"
-
-    substituteInPlace src/app/layout.tsx --replace-fail \
-      "weight: ['300', '400', '500', '700']" \
-      "weight: '100 900'"
-
-    cp "${montserrat}/share/fonts/woff2/Montserrat-Regular.woff2" src/app/Montserrat.woff2
+        # Ensure the data directory exists for build (drizzle config references it)
+        mkdir -p data
   '';
 
-  # don't generate the dist tarball
+  # Build the native better-sqlite3 module before the Next.js build
+  preBuild = ''
+    pushd node_modules/better-sqlite3
+    npm run build-release --offline --nodedir="${nodeSources}"
+    find build -type f -exec \
+      ${removeReferencesTo}/bin/remove-references-to \
+      -t "${nodeSources}" {} \;
+    popd
+  '';
+
+  # Next.js standalone output produces .next/standalone with server.js
+  installPhase = ''
+    runHook preInstall
+
+    mkdir -p $out/{share/perplexica/.next,bin}
+
+    # Copy the standalone server (includes minimal node_modules)
+    cp -r .next/standalone/. $out/share/perplexica/
+
+    # Copy static assets as required by Next.js standalone mode
+    cp -r .next/static $out/share/perplexica/.next/static
+
+    # Copy public directory
+    cp -r public $out/share/perplexica/public
+
+    # Copy drizzle migrations (needed at runtime for DB setup)
+    cp -r drizzle $out/share/perplexica/drizzle
+
+    # Create a symlink for the Next.js cache to a writable location
+    ln -s /var/cache/perplexica $out/share/perplexica/.next/cache
+
+    makeWrapper "${lib.getExe nodejs}" "$out/bin/perplexica" \
+      --set-default PORT 3000 \
+      --set-default HOSTNAME 0.0.0.0 \
+      --chdir "$out/share/perplexica" \
+      --add-flags "$out/share/perplexica/server.js"
+
+    runHook postInstall
+  '';
+
+  # Don't try to produce a yarn dist tarball
   doDist = false;
 
+  passthru.updateScript = ./update.sh;
+
   meta = {
-    description = "Perplexica is an AI-powered search engine. It is an Open source alternative to Perplexity AI";
+    description = "AI-powered search engine, an open source alternative to Perplexity AI";
     homepage = "https://github.com/ItzCrazyKns/Perplexica";
     license = lib.licenses.mit;
     maintainers = with lib.maintainers; [ happysalada ];
-    platforms = lib.platforms.all;
-    mainProgram = pname;
+    mainProgram = "perplexica";
+    platforms = lib.platforms.linux;
   };
-}
+})

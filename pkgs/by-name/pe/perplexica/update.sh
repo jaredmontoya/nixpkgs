@@ -17,7 +17,7 @@ set -euox pipefail
 if [ -z "$tag" ]; then
   tag="$(
     curl "https://api.github.com/repos/$ORG/$PROJ/releases?per_page=1" |
-    jq -r '.[0].tag_name'
+      jq -r '.[0].tag_name'
   )"
 fi
 
@@ -29,14 +29,13 @@ trap 'rm -rf "$tmpdir"' EXIT
 
 pushd $tmpdir
 curl -O "$src/yarn.lock"
-yarn_sha256=$(prefetch-yarn-deps yarn.lock)
+yarn_hash=$(prefetch-yarn-deps yarn.lock | tail -1)
 popd
 
-curl -O "$src/package.json"
-cat > pin.json << EOF
+cat >pin.json <<EOF
 {
   "version": "$(echo $tag | grep -P '(\d|\.)+' -o)",
   "srcHash": "$src_hash",
-  "yarnSha256": "$yarn_sha256"
+  "yarnHash": "$yarn_hash"
 }
 EOF

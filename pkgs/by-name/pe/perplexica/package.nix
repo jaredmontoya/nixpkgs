@@ -98,11 +98,25 @@ stdenv.mkDerivation (finalAttrs: {
     # Create a symlink for the Next.js cache to a writable location
     ln -s /var/cache/perplexica $out/share/perplexica/.next/cache
 
-    makeWrapper "${lib.getExe nodejs}" "$out/bin/perplexica" \
-      --set-default PORT 3000 \
-      --set-default HOSTNAME 0.0.0.0 \
-      --chdir "$out/share/perplexica" \
-      --add-flags "$out/share/perplexica/server.js"
+    # Wrapper script that sets up the writable data directory before starting the server.
+    # Perplexica uses DATA_DIR to locate data/config.json, data/db.sqlite, and drizzle/.
+    # The Nix store is read-only, so DATA_DIR must point to a writable location.
+    # We symlink the drizzle migrations from the store into DATA_DIR so the migration
+    # code can find them.
+    cat > $out/bin/perplexica <<WRAPPER
+    #!${stdenv.shell}
+    export DATA_DIR="\''${DATA_DIR:-/var/lib/perplexica}"
+    export PORT="\''${PORT:-3000}"
+    export HOSTNAME="\''${HOSTNAME:-0.0.0.0}"
+
+    mkdir -p "\$DATA_DIR/data"
+    mkdir -p "\$DATA_DIR/uploads"
+    ln -sfn "$out/share/perplexica/drizzle" "\$DATA_DIR/drizzle"
+
+    cd "$out/share/perplexica"
+    exec "${lib.getExe nodejs}" "$out/share/perplexica/server.js" "\$@"
+    WRAPPER
+    chmod +x $out/bin/perplexica
 
     runHook postInstall
   '';

@@ -98,11 +98,25 @@ stdenv.mkDerivation (finalAttrs: {
     # Create a symlink for the Next.js cache to a writable location
     ln -s /var/cache/vane $out/share/vane/.next/cache
 
-    makeWrapper "${lib.getExe nodejs}" "$out/bin/vane" \
-      --set-default PORT 3000 \
-      --set-default HOSTNAME 0.0.0.0 \
-      --chdir "$out/share/vane" \
-      --add-flags "$out/share/vane/server.js"
+    # Wrapper script that sets up the writable data directory before starting the server.
+    # Vane uses DATA_DIR to locate data/config.json, data/db.sqlite, and drizzle/.
+    # The Nix store is read-only, so DATA_DIR must point to a writable location.
+    # We symlink the drizzle migrations from the store into DATA_DIR so the migration
+    # code can find them.
+    cat > $out/bin/vane <<WRAPPER
+    #!${stdenv.shell}
+    export DATA_DIR="\''${DATA_DIR:-/var/lib/vane}"
+    export PORT="\''${PORT:-3000}"
+    export HOSTNAME="\''${HOSTNAME:-0.0.0.0}"
+
+    mkdir -p "\$DATA_DIR/data"
+    mkdir -p "\$DATA_DIR/uploads"
+    ln -sfn "$out/share/vane/drizzle" "\$DATA_DIR/drizzle"
+
+    cd "$out/share/vane"
+    exec "${lib.getExe nodejs}" "$out/share/vane/server.js" "\$@"
+    WRAPPER
+    chmod +x $out/bin/vane
 
     runHook postInstall
   '';

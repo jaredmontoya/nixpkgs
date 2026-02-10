@@ -1,33 +1,33 @@
 {
-  config,
   lib,
+  stdenv,
   fetchFromGitHub,
   fetchurl,
   cmake,
   pkg-config,
   python3Packages,
+  nix-update-script,
+
+  # dependencies
   alsa-lib,
   espeak-ng,
   onnxruntime,
+
+  # optional CUDA support
+  config,
   cudaSupport ? config.cudaSupport,
   cudaPackages ? { },
-  stdenv,
+
+  # optional features
+  websocketSupport ? true,
+
   alsa-plugins,
-  clang-tools,
-  tree,
 }:
 
 let
-  version = "1.12.24";
-
   effectiveStdenv = if cudaSupport then cudaPackages.backendStdenv else stdenv;
 
-  inherit (cudaPackages.cudaFlags) cudaCapabilities;
-  # E.g. [ "80" "86" "90" ]
-  cudaArchitectures = lib.map cudaPackages.cudaFlags.dropDot cudaCapabilities;
-  cudaArchitecturesString = lib.strings.concatStringsSep ";" cudaArchitectures;
-
-  espeak-ng-patched = espeak-ng.overrideAttrs (old: {
+  espeak-ng-patched = espeak-ng.overrideAttrs (_: {
     version = "f6fed6c58b5e0998b8e68c6610125e2d07d595a7";
     src = fetchFromGitHub {
       owner = "espeak-ng";
@@ -42,6 +42,9 @@ let
     patches = [ ];
   });
 
+  # Pre-fetched dependencies for cmake FetchContent.
+  # These are copied into the source tree so cmake finds them locally
+  # instead of trying to download them (which fails in the sandbox).
   cache = [
     {
       name = "espeak-ng-f6fed6c58b5e0998b8e68c6610125e2d07d595a7.zip";
@@ -164,103 +167,78 @@ let
     }
   ];
 in
-effectiveStdenv.mkDerivation rec {
+effectiveStdenv.mkDerivation (finalAttrs: {
   pname = "sherpa-onnx";
-  inherit version;
+  version = "1.12.24";
 
   src = fetchFromGitHub {
     owner = "k2-fsa";
     repo = "sherpa-onnx";
-    rev = "v${version}";
+    tag = "v${finalAttrs.version}";
     hash = "sha256-rcCQ31l7mR18gaOO+Sxa7uPoLMw8khR9Uhq9GmPsK60=";
     fetchSubmodules = true;
   };
+
   separateDebugInfo = true;
+
   patches = [
     ./espeak.patch
   ];
   nativeBuildInputs = [
     cmake
     pkg-config
-    python3Packages.python
     espeak-ng-patched
+    python3Packages.python
+    python3Packages.pybind11
+    python3Packages.numpy
   ]
-  ++ (with python3Packages; [
-    pip
-    python
-    build
-    setuptools
-    wheel
-    onnxruntime
-    pybind11
-    numpy
-  ])
   ++ lib.optionals cudaSupport [
     cudaPackages.cuda_nvcc
   ];
 
   buildInputs = [
     alsa-lib
-    clang-tools
+    onnxruntime
   ]
-  ++ (with python3Packages; [
-    packaging
-  ])
   ++ lib.optionals cudaSupport (
     with cudaPackages;
     [
-      cuda_cccl # cub/cub.cuh
-      libcublas # cublas_v2.h
-      libcurand # curand.h
-      libcusparse # cusparse.h
-      libcufft # cufft.h
-      cudnn # cudnn.h
+      cuda_cccl
+      libcublas
+      libcurand
+      libcusparse
+      libcufft
+      cudnn
       cuda_cudart
-      nccl # cudnn.h
+      nccl
     ]
   );
-  outputs = [
-    "out"
-    "python"
-  ];
 
-  enableParallelBuilding = true;
+  cmakeDir = "..";
 
-  cmakeDir = "cmake";
-
-  # populate dependencies for cmake
+  # Populate pre-fetched dependencies so cmake FetchContent finds them
+  # locally instead of attempting network downloads.
   preConfigure = ''
-    original_ifs="$IFS"
-    for i in ${lib.concatStringsSep " " (map (s: "${s.name},${s.src}") cache)}; do
-      IFS=","
-      set -- $i
-      echo "$1" "$2"
-      cp -r $2 ./$1
-    done
-    IFS="$original_ifs"
-    unset original_ifs
+    ${lib.concatMapStringsSep "\n" (s: "cp ${s.src} ./${s.name}") cache}
   '';
 
   cmakeFlags = [
-    "-S .."
-    "-DFETCHCONTENT_QUIET=OFF"
-    "-DBUILD_SHARED_LIBS=ON"
-    "-DSHERPA_ONNX_ENABLE_WEBSOCKET=OFF"
-    "-DSHERPA_ONNX_ENABLE_PORTAUDIO=OFF"
-    "-DSHERPA_ONNX_ENABLE_PYTHON=ON"
-    "-DSHERPA_ONNX_BUILD_C_API_EXAMPLES=OFF"
-    "-DSHERPA_ONNX_ENABLE_EPSEAK_NG_EXE=OFF"
-    "-DSHERPA_ONNX_ENABLE_CHECK=OFF"
-    "-DSHERPA_ONNX_ENABLE_C_API=ON"
-    "-Donnxruntime_SOURCE_DIR=${onnxruntime.dev}"
-    "-DFETCHCONTENT_TRY_FIND_PACKAGE_MODE=ALWAYS"
-    "-DCMAKE_INSTALL_PREFIX=./install"
-    "-DSHERPA_ONNX_ENABLE_GPU=${if cudaSupport then "ON" else "OFF"}"
+    (lib.cmakeBool "FETCHCONTENT_QUIET" false)
+    (lib.cmakeBool "BUILD_SHARED_LIBS" true)
+    (lib.cmakeBool "SHERPA_ONNX_ENABLE_WEBSOCKET" websocketSupport)
+    (lib.cmakeBool "SHERPA_ONNX_ENABLE_PORTAUDIO" false)
+    (lib.cmakeBool "SHERPA_ONNX_ENABLE_PYTHON" true)
+    (lib.cmakeBool "SHERPA_ONNX_BUILD_C_API_EXAMPLES" false)
+    (lib.cmakeBool "SHERPA_ONNX_ENABLE_CHECK" false)
+    (lib.cmakeBool "SHERPA_ONNX_ENABLE_C_API" true)
+    (lib.cmakeFeature "onnxruntime_SOURCE_DIR" "${onnxruntime.dev}")
+    (lib.cmakeFeature "FETCHCONTENT_TRY_FIND_PACKAGE_MODE" "ALWAYS")
+    (lib.cmakeBool "SHERPA_ONNX_ENABLE_GPU" cudaSupport)
     "-Wno-dev"
   ]
   ++ lib.optionals cudaSupport [
     (lib.cmakeFeature "onnxruntime_CUDNN_HOME" "${cudaPackages.cudnn}")
-    (lib.cmakeFeature "CMAKE_CUDA_ARCHITECTURES" cudaArchitecturesString)
+    (lib.cmakeFeature "CMAKE_CUDA_ARCHITECTURES" cudaPackages.flags.cmakeCudaArchitecturesString)
   ];
 
   env = lib.optionalAttrs effectiveStdenv.cc.isClang {
@@ -269,36 +247,21 @@ effectiveStdenv.mkDerivation rec {
     ];
   };
 
-  # doCheck = false;
-
   requiredSystemFeatures = lib.optionals cudaSupport [ "big-parallel" ];
 
-  buildPhase = ''
-    export CMAKE_ARGS="''${cmakeFlags[*]}"
-    python -m build --wheel --no-isolation --skip-dependency-check --outdir "$python/" ..
-  '';
-
-  postInstall = ''
-    ${tree}/bin/tree /build/source/build
-    cp -R /build/source/build/install/bin $out
-    cp -R /build/source/build/install/include $out
-    cp -R /build/source/build/install/lib $out
-  '';
-
   passthru = {
-    inherit cudaSupport cudaPackages onnxruntime; # for the nugets, wheels etc
+    inherit cudaSupport cudaPackages onnxruntime;
     espeak-ng = espeak-ng-patched;
+    updateScript = nix-update-script { };
   };
 
-  meta = with lib; {
-    description = "Speech-to-text, text-to-speech, and speaker recongition using next-gen Kaldi with onnxruntime without Internet connection.";
-    longDescription = ''
-      Speech-to-text, text-to-speech, and speaker recongition using next-gen Kaldi with onnxruntime without Internet connection.
-    '';
+  meta = {
+    description = "Speech-to-text, text-to-speech, and speaker recognition using next-gen Kaldi with onnxruntime";
     homepage = "https://github.com/k2-fsa/sherpa-onnx";
-    changelog = "https://github.com/k2-fsa/sherpa-onnx/releases/tag/v${version}";
-    platforms = platforms.unix;
-    license = licenses.asl20;
-    maintainers = [ ];
+    changelog = "https://github.com/k2-fsa/sherpa-onnx/releases/tag/v${finalAttrs.version}";
+    license = lib.licenses.asl20;
+    platforms = lib.platforms.unix;
+    maintainers = with lib.maintainers; [ ];
+    mainProgram = "sherpa-onnx";
   };
-}
+})

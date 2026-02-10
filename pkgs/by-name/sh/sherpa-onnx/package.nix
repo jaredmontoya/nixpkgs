@@ -18,7 +18,7 @@
 }:
 
 let
-  version = "1.12.23";
+  version = "1.12.24";
 
   effectiveStdenv = if cudaSupport then cudaPackages.backendStdenv else stdenv;
 
@@ -79,10 +79,10 @@ let
       };
     }
     {
-      name = "kaldi-decoder-0.2.10.tar.gz";
+      name = "kaldi-decoder-0.2.11.tar.gz";
       src = fetchurl {
-        url = "https://github.com/k2-fsa/kaldi-decoder/archive/refs/tags/v0.2.10.tar.gz";
-        hash = "sha256-o9YC7cH0Iqz+ZjFT+vPwpxYwXsH5W4/PnSjTAdaCcwk=";
+        url = "https://github.com/k2-fsa/kaldi-decoder/archive/refs/tags/v0.2.11.tar.gz";
+        hash = "sha256-hcpGJTVZJUHrW6bSGEMAnPNHOPUbKLcfhIgqNpS1KL8=";
       };
     }
     {
@@ -90,6 +90,13 @@ let
       src = fetchurl {
         url = "https://github.com/likle/cargs/archive/refs/tags/v1.0.3.tar.gz";
         hash = "sha256-3bolvTXpxsdbxwbBJgAbjOjghNQO83BQ5qppY+g264s=";
+      };
+    }
+    {
+      name = "json-3.12.0.tar.gz";
+      src = fetchurl {
+        url = "https://github.com/nlohmann/json/archive/refs/tags/v3.12.0.tar.gz";
+        hash = "sha256-S5LrDAbRBoP3RHzpQGy5fNS0U74Y1yeTIPey8CXBAYc=";
       };
     }
     {
@@ -165,7 +172,7 @@ effectiveStdenv.mkDerivation rec {
     owner = "k2-fsa";
     repo = "sherpa-onnx";
     rev = "v${version}";
-    hash = "sha256-FZbFhePhQqUow2rXjGVjqo8nvvB43SUymmHR3TMdEas=";
+    hash = "sha256-rcCQ31l7mR18gaOO+Sxa7uPoLMw8khR9Uhq9GmPsK60=";
     fetchSubmodules = true;
   };
   separateDebugInfo = true;

@@ -10,7 +10,6 @@
 
   # dependencies
   alsa-lib,
-  espeak-ng,
   onnxruntime,
 
   # optional CUDA support
@@ -21,26 +20,10 @@
   # optional features
   websocketSupport ? true,
 
-  alsa-plugins,
 }:
 
 let
   effectiveStdenv = if cudaSupport then cudaPackages.backendStdenv else stdenv;
-
-  espeak-ng-patched = espeak-ng.overrideAttrs (_: {
-    version = "f6fed6c58b5e0998b8e68c6610125e2d07d595a7";
-    src = fetchFromGitHub {
-      owner = "espeak-ng";
-      repo = "espeak-ng";
-      rev = "f6fed6c58b5e0998b8e68c6610125e2d07d595a7";
-      hash = "sha256-+3JHColf/g/T7zDIGIUmj8hig+uZMN0KqlTVzIXsNTw=";
-    };
-    postInstall = lib.optionalString stdenv.hostPlatform.isLinux ''
-      wrapProgram $out/bin/espeak-ng-bin \
-        --set ALSA_PLUGIN_DIR ${alsa-plugins}/lib/alsa-lib
-    '';
-    patches = [ ];
-  });
 
   # Pre-fetched dependencies for cmake FetchContent.
   # These are copied into the source tree so cmake finds them locally
@@ -145,13 +128,6 @@ let
       };
     }
     {
-      name = "pa_stable_v190700_20210406.tgz";
-      src = fetchurl {
-        url = "http://files.portaudio.com/archives/pa_stable_v190700_20210406.tgz";
-        hash = "sha256-R++/Qsd8GaBdIuYn1Chz6ZHsDBNXIZwNdM5qKUjLLe8=";
-      };
-    }
-    {
       name = "websocketpp-b9aeec6eaf3d5610503439b4fae3581d9aff08e8.zip";
       src = fetchurl {
         url = "https://github.com/zaphoyd/websocketpp/archive/b9aeec6eaf3d5610503439b4fae3581d9aff08e8.zip";
@@ -187,7 +163,6 @@ effectiveStdenv.mkDerivation (finalAttrs: {
   nativeBuildInputs = [
     cmake
     pkg-config
-    espeak-ng-patched
     python3Packages.python
     python3Packages.pybind11
     python3Packages.numpy
@@ -197,8 +172,10 @@ effectiveStdenv.mkDerivation (finalAttrs: {
   ];
 
   buildInputs = [
-    alsa-lib
     onnxruntime
+  ]
+  ++ lib.optionals effectiveStdenv.hostPlatform.isLinux [
+    alsa-lib
   ]
   ++ lib.optionals cudaSupport (
     with cudaPackages;
@@ -231,6 +208,7 @@ effectiveStdenv.mkDerivation (finalAttrs: {
     (lib.cmakeBool "SHERPA_ONNX_BUILD_C_API_EXAMPLES" false)
     (lib.cmakeBool "SHERPA_ONNX_ENABLE_CHECK" false)
     (lib.cmakeBool "SHERPA_ONNX_ENABLE_C_API" true)
+    (lib.cmakeBool "SHERPA_ONNX_ENABLE_TESTS" true)
     (lib.cmakeFeature "onnxruntime_SOURCE_DIR" "${onnxruntime.dev}")
     (lib.cmakeFeature "FETCHCONTENT_TRY_FIND_PACKAGE_MODE" "ALWAYS")
     (lib.cmakeBool "SHERPA_ONNX_ENABLE_GPU" cudaSupport)
@@ -241,6 +219,18 @@ effectiveStdenv.mkDerivation (finalAttrs: {
     (lib.cmakeFeature "CMAKE_CUDA_ARCHITECTURES" cudaPackages.flags.cmakeCudaArchitecturesString)
   ];
 
+  doCheck = true;
+
+  # The default `make check` target includes a clang-tidy step.
+  # Use ctest directly to run only the C++ unit tests.
+  # Python tests are excluded because they require the sherpa_onnx
+  # module to be installed first.
+  checkPhase = ''
+    runHook preCheck
+    ctest --output-on-failure --exclude-regex '_py$'
+    runHook postCheck
+  '';
+
   env = lib.optionalAttrs effectiveStdenv.cc.isClang {
     NIX_CFLAGS_COMPILE = toString [
       "-Wno-error=deprecated-declarations"
@@ -250,8 +240,6 @@ effectiveStdenv.mkDerivation (finalAttrs: {
   requiredSystemFeatures = lib.optionals cudaSupport [ "big-parallel" ];
 
   passthru = {
-    inherit cudaSupport cudaPackages onnxruntime;
-    espeak-ng = espeak-ng-patched;
     updateScript = nix-update-script { };
   };
 

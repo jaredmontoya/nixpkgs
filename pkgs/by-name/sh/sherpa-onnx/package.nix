@@ -5,7 +5,7 @@
   fetchurl,
   cmake,
   pkg-config,
-  python3Packages,
+  python3Packages ? { },
   nix-update-script,
 
   # dependencies
@@ -19,6 +19,7 @@
 
   # optional features
   websocketSupport ? true,
+  pythonSupport ? false,
 
 }:
 
@@ -155,6 +156,11 @@ effectiveStdenv.mkDerivation (finalAttrs: {
     fetchSubmodules = true;
   };
 
+  outputs = [
+    "out"
+  ]
+  ++ lib.optionals pythonSupport [ "python" ];
+
   separateDebugInfo = true;
 
   patches = [
@@ -163,10 +169,15 @@ effectiveStdenv.mkDerivation (finalAttrs: {
   nativeBuildInputs = [
     cmake
     pkg-config
-    python3Packages.python
-    python3Packages.pybind11
-    python3Packages.numpy
   ]
+  ++ lib.optionals pythonSupport (
+    with python3Packages;
+    [
+      python
+      pybind11
+      numpy
+    ]
+  )
   ++ lib.optionals cudaSupport [
     cudaPackages.cuda_nvcc
   ];
@@ -191,6 +202,10 @@ effectiveStdenv.mkDerivation (finalAttrs: {
     ]
   );
 
+  propagatedBuildInputs = lib.optionals pythonSupport [
+    python3Packages.numpy
+  ];
+
   cmakeDir = "..";
 
   # Populate pre-fetched dependencies so cmake FetchContent finds them
@@ -204,7 +219,7 @@ effectiveStdenv.mkDerivation (finalAttrs: {
     (lib.cmakeBool "BUILD_SHARED_LIBS" true)
     (lib.cmakeBool "SHERPA_ONNX_ENABLE_WEBSOCKET" websocketSupport)
     (lib.cmakeBool "SHERPA_ONNX_ENABLE_PORTAUDIO" false)
-    (lib.cmakeBool "SHERPA_ONNX_ENABLE_PYTHON" true)
+    (lib.cmakeBool "SHERPA_ONNX_ENABLE_PYTHON" pythonSupport)
     (lib.cmakeBool "SHERPA_ONNX_BUILD_C_API_EXAMPLES" false)
     (lib.cmakeBool "SHERPA_ONNX_ENABLE_CHECK" false)
     (lib.cmakeBool "SHERPA_ONNX_ENABLE_C_API" true)
@@ -214,20 +229,53 @@ effectiveStdenv.mkDerivation (finalAttrs: {
     (lib.cmakeBool "SHERPA_ONNX_ENABLE_GPU" cudaSupport)
     "-Wno-dev"
   ]
+  ++ lib.optionals pythonSupport [
+    (lib.cmakeFeature "PYTHON_EXECUTABLE" (lib.getExe python3Packages.python))
+  ]
   ++ lib.optionals cudaSupport [
     (lib.cmakeFeature "onnxruntime_CUDNN_HOME" "${cudaPackages.cudnn}")
     (lib.cmakeFeature "CMAKE_CUDA_ARCHITECTURES" cudaPackages.flags.cmakeCudaArchitecturesString)
   ];
 
+  # Assemble the Python package in the `python` output.
+  # The __init__.py imports from sherpa_onnx.lib._sherpa_onnx, so the
+  # native extension must be placed in a `lib/` subdirectory.
+  postInstall = lib.optionalString pythonSupport ''
+    local site="$python/${python3Packages.python.sitePackages}"
+    mkdir -p "$site/sherpa_onnx/lib"
+
+    cp -r $src/sherpa-onnx/python/sherpa_onnx/*.py "$site/sherpa_onnx/"
+    mv $out/lib/_sherpa_onnx*.so "$site/sherpa_onnx/lib/"
+    touch "$site/sherpa_onnx/lib/__init__.py"
+  '';
+
   doCheck = true;
 
   # The default `make check` target includes a clang-tidy step.
-  # Use ctest directly to run only the C++ unit tests.
-  # Python tests are excluded because they require the sherpa_onnx
-  # module to be installed first.
+  # Use ctest directly to run the unit tests.
+  # When pythonSupport is enabled, create a `sherpa_onnx/lib/` subpackage
+  # containing the native extension so that Python tests can resolve
+  # `from sherpa_onnx.lib._sherpa_onnx import ...`.
+  # test_fast_clustering_py is excluded because it requires soundfile.
   checkPhase = ''
     runHook preCheck
-    ctest --output-on-failure --exclude-regex '_py$'
+
+    ${lib.optionalString pythonSupport ''
+      mkdir -p ../sherpa-onnx/python/sherpa_onnx/lib
+
+      local so_file
+      so_file="$(find . -name '_sherpa_onnx*.so' -not -path '*/sherpa_onnx/*' -print -quit)"
+      if [[ -z "$so_file" ]]; then
+        echo "ERROR: could not find _sherpa_onnx*.so for Python tests" >&2
+        exit 1
+      fi
+      ln -sf "$(realpath "$so_file")" ../sherpa-onnx/python/sherpa_onnx/lib/
+
+      : > ../sherpa-onnx/python/sherpa_onnx/lib/__init__.py
+    ''}
+
+    ctest --output-on-failure \
+      ${lib.optionalString pythonSupport "--exclude-regex 'test_fast_clustering_py'"}
     runHook postCheck
   '';
 

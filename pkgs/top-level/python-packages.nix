@@ -11287,6 +11287,8 @@ self: super: with self; {
     };
   };
 
+  onnx-asr = callPackage ../development/python-modules/onnx-asr { };
+
   onnx-ir = callPackage ../development/python-modules/onnx-ir { };
 
   onnxconverter-common = callPackage ../development/python-modules/onnxconverter-common { };

@@ -12,8 +12,14 @@
   alsa-lib,
   eigen,
   gtest,
+  hclust-cpp,
+  kaldi-decoder,
+  kaldi-native-fbank,
+  kaldifst,
+  kissfft,
   nlohmann_json,
   onnxruntime,
+  simple-sentencepiece,
 
   # optional features
   cudaSupport ? config.cudaSupport,
@@ -23,9 +29,18 @@
 }:
 
 let
-  # Pre-fetched dependencies for cmake FetchContent.
-  # These are copied into the source tree so cmake finds them locally
-  # instead of trying to download them (which fails in the sandbox).
+  # csukuangfj's openfst fork — NOT interchangeable with upstream openfst.
+  # sherpa-onnx uses a different tag (2024-06-19) than kaldifst (2024-06-13).
+  openfst-src = fetchFromGitHub {
+    owner = "csukuangfj";
+    repo = "openfst";
+    tag = "sherpa-onnx-2024-06-19";
+    hash = "sha256-EK8ZBmFZKLrOwSXACMMzOAV95cOyigw99VEYHBJnkHI=";
+  };
+
+  # Pre-fetched dependencies for cmake FetchContent that have no
+  # corresponding nixpkgs package (custom forks, pinned versions, or
+  # optional websocket deps).
   cache = [
     {
       name = "espeak-ng-f6fed6c58b5e0998b8e68c6610125e2d07d595a7.zip";
@@ -35,66 +50,10 @@ let
       };
     }
     {
-      name = "kaldi-native-fbank-1.22.3.tar.gz";
-      src = fetchurl {
-        url = "https://github.com/csukuangfj/kaldi-native-fbank/archive/refs/tags/v1.22.3.tar.gz";
-        hash = "sha256-kXbMZvx84e34XPNVsG4yDFfbYpffdCd/V1GDRoiTz2E=";
-      };
-    }
-    {
-      name = "simple-sentencepiece-0.7.tar.gz";
-      src = fetchurl {
-        url = "https://github.com/pkufool/simple-sentencepiece/archive/refs/tags/v0.7.tar.gz";
-        hash = "sha256-F0ioIgYKNbqp9mCfhO/I61TcDnS57OPYI2e3EZ/cda8=";
-      };
-    }
-    {
-      name = "kaldifst-1.7.17.tar.gz";
-      src = fetchurl {
-        url = "https://github.com/k2-fsa/kaldifst/archive/refs/tags/v1.7.17.tar.gz";
-        hash = "sha256-xLcBojpAC9qAMlhrAsfg1egTp2WDLfYMI+bfnmKwEPQ=";
-      };
-    }
-    {
-      name = "kaldi-decoder-0.2.11.tar.gz";
-      src = fetchurl {
-        url = "https://github.com/k2-fsa/kaldi-decoder/archive/refs/tags/v0.2.11.tar.gz";
-        hash = "sha256-hcpGJTVZJUHrW6bSGEMAnPNHOPUbKLcfhIgqNpS1KL8=";
-      };
-    }
-    {
-      name = "cargs-1.0.3.tar.gz";
-      src = fetchurl {
-        url = "https://github.com/likle/cargs/archive/refs/tags/v1.0.3.tar.gz";
-        hash = "sha256-3bolvTXpxsdbxwbBJgAbjOjghNQO83BQ5qppY+g264s=";
-      };
-    }
-    {
       name = "piper-phonemize-78a788e0b719013401572d70fef372e77bff8e43.zip";
       src = fetchurl {
         url = "https://github.com/csukuangfj/piper-phonemize/archive/78a788e0b719013401572d70fef372e77bff8e43.zip";
         hash = "sha256-iWQaRkiaSJh1RkPOV72pybVLTKRkhf3AK/DchLhmZF0=";
-      };
-    }
-    {
-      name = "openfst-sherpa-onnx-2024-06-19.tar.gz";
-      src = fetchurl {
-        url = "https://github.com/csukuangfj/openfst/archive/refs/tags/sherpa-onnx-2024-06-19.tar.gz";
-        hash = "sha256-XJjoLMUJxWGFAt3khguOoE2EOFDtV+bWtZC2RLJohT0=";
-      };
-    }
-    {
-      name = "hclust-cpp-2024-09-29.tar.gz";
-      src = fetchurl {
-        url = "https://github.com/csukuangfj/hclust-cpp/archive/refs/tags/2024-09-29.tar.gz";
-        hash = "sha256-q6tRRIo8tUJyquB1IpcDBuCyzGR51Z17Geeu5NbO3TM=";
-      };
-    }
-    {
-      name = "kissfft-febd4caeed32e33ad8b2e0bb5ea77542c40f18ec.zip";
-      src = fetchurl {
-        url = "https://github.com/mborgerding/kissfft/archive/febd4caeed32e33ad8b2e0bb5ea77542c40f18ec.zip";
-        hash = "sha256-SXED5mQWjr45WAt1etvmFvbPhaFlcq9YHKe8QtCrE/0=";
       };
     }
   ]
@@ -159,10 +118,19 @@ stdenv.mkDerivation (finalAttrs: {
     ]
   );
 
-  # Populate pre-fetched dependencies so cmake FetchContent finds them
-  # locally instead of attempting network downloads.
+  # Copy pre-fetched tarballs so cmake FetchContent finds them locally.
+  # Prepare a writable copy of the openfst fork with patches applied
+  # (FETCHCONTENT_SOURCE_DIR_* skips PATCH_COMMAND, so we do it here).
   preConfigure = ''
     ${lib.concatMapStringsSep "\n" (s: "cp ${s.src} ./${s.name}") cache}
+
+    local openfst_dir="$NIX_BUILD_TOP/openfst-patched"
+    cp -r ${openfst-src} "$openfst_dir"
+    chmod -R u+w "$openfst_dir"
+    sed -i 's/enable_testing()//g' "$openfst_dir/src/CMakeLists.txt"
+    sed -i 's/add_subdirectory(test)//g' "$openfst_dir/src/CMakeLists.txt"
+    sed -i '/message/d' "$openfst_dir/src/script/CMakeLists.txt"
+    cmakeFlagsArray+=("-DFETCHCONTENT_SOURCE_DIR_OPENFST=$openfst_dir")
   '';
 
   cmakeFlags = [
@@ -175,10 +143,16 @@ stdenv.mkDerivation (finalAttrs: {
     (lib.cmakeBool "SHERPA_ONNX_ENABLE_TESTS" true)
     (lib.cmakeFeature "onnxruntime_SOURCE_DIR" "${onnxruntime.dev}")
     (lib.cmakeBool "SHERPA_ONNX_ENABLE_GPU" cudaSupport)
-    # Use nixpkgs sources instead of vendored downloads where possible.
+    # Use nixpkgs sources instead of vendored downloads.
     (lib.cmakeFeature "FETCHCONTENT_SOURCE_DIR_JSON" "${nlohmann_json.src}")
     (lib.cmakeFeature "FETCHCONTENT_SOURCE_DIR_EIGEN" "${eigen.src}")
     (lib.cmakeFeature "FETCHCONTENT_SOURCE_DIR_GOOGLETEST" "${gtest.src}")
+    (lib.cmakeFeature "FETCHCONTENT_SOURCE_DIR_KALDI_DECODER" "${kaldi-decoder.src}")
+    (lib.cmakeFeature "FETCHCONTENT_SOURCE_DIR_KALDIFST" "${kaldifst.src}")
+    (lib.cmakeFeature "FETCHCONTENT_SOURCE_DIR_KALDI_NATIVE_FBANK" "${kaldi-native-fbank.src}")
+    (lib.cmakeFeature "FETCHCONTENT_SOURCE_DIR_SIMPLE-SENTENCEPIECE" "${simple-sentencepiece.src}")
+    (lib.cmakeFeature "FETCHCONTENT_SOURCE_DIR_HCLUST_CPP" "${hclust-cpp.src}")
+    (lib.cmakeFeature "FETCHCONTENT_SOURCE_DIR_KISSFFT" "${kissfft.src}")
     "-Wno-dev"
   ]
   ++ lib.optionals pythonSupport [
